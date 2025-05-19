@@ -5,12 +5,11 @@ import { supabase } from '../../supabaseClient'
 import { v4 as uuidv4 } from 'uuid'
 
 export default function WZFormularz() {
-  // Stany
   const [isClient, setIsClient] = useState(false)
-  const kierowcaId = '70e2c26d-63cd-4a52-9580-d7ee5437413b'
+  const kierowcaId = '70e2c26d-63cd-4a52-9580-d7ee5437413b' // stałe ID kierowcy
   const CENA_ZWROT_CIASTA = 24.60
   const CENA_ZWROT_DROBNICA = 40.00
-  const STAWKA_VAT = 0.05
+  const STAWKA_VAT = 0.05 // Poprawiono na dokładne 5%
 
   const [sklepy, setSklepy] = useState<{ id: string; nazwa: string }[]>([])
   const [produkty, setProdukty] = useState<any[]>([])
@@ -24,15 +23,15 @@ export default function WZFormularz() {
   const [zwrotyDrobnica, setZwrotyDrobnica] = useState('0.000')
   const [formaPlatnosci, setFormaPlatnosci] = useState<'gotowka' | 'przelew'>('gotowka')
 
-  // Hook useEffect uruchamiany po załadowaniu komponentu
   useEffect(() => {
     setIsClient(true)
+
     const fetchDane = async () => {
-      // Pobieranie sklepów
+      // Pobierz sklepy
       const { data: sklepyData } = await supabase.from('sklepy').select('id, nazwa')
       setSklepy(sklepyData || [])
 
-      // Pobieranie produktów z ostatniego załadunku
+      // Pobierz załadunki nieużyte dla tego kierowcy
       const { data: zaladunekData } = await supabase
         .from('zaladunek')
         .select('*')
@@ -44,15 +43,15 @@ export default function WZFormularz() {
         return
       }
 
+      // Weź najnowszy załadunek po dacie
       const ostatniaData = zaladunekData.reduce((naj, curr) =>
         curr.data > naj ? curr.data : naj,
         zaladunekData[0].data
       )
-
       const tylkoOstatnie = zaladunekData.filter((z) => z.data === ostatniaData)
       setProdukty(tylkoOstatnie)
 
-      // Pobieranie cen produktów
+      // Pobierz ceny netto produktów
       const { data: cenyData } = await supabase.from('ceny').select('produkt, cena_netto')
       const mapaCen = (cenyData || []).reduce((acc, curr) => {
         acc[curr.produkt.trim().toLowerCase()] = Number(curr.cena_netto)
@@ -60,9 +59,11 @@ export default function WZFormularz() {
       }, {} as Record<string, number>)
       setCeny(mapaCen)
     }
+
     fetchDane()
   }, [])
 
+  // Filtruj dostępne wagi po wybraniu ciasta
   useEffect(() => {
     if (wybraneCiasto) {
       const wagiDlaCiasta = produkty.filter(
@@ -73,26 +74,25 @@ export default function WZFormularz() {
     }
   }, [wybraneCiasto, produkty, pozycjeWZ])
 
-  // Jeśli klient nie jest załadowany, zwróć null (zapobiega problemom na serwerze)
   if (!isClient) return null
 
-  // Funkcja obsługująca dodawanie wybranych wag
   const handleZatwierdzWagi = () => {
     if (!wybraneCiasto || wybraneWagi.length === 0) return
 
     const klucz = Object.keys(ceny).find(
       (key) => key.trim().toLowerCase() === wybraneCiasto.trim().toLowerCase()
     )
+
     const cenaZaKg = klucz ? ceny[klucz] : 0
 
     const nowePozycje = dostepneWagi
       .filter((w) => wybraneWagi.includes(w.id))
       .map((sztuka) => {
-        const waga = Number(sztuka.waga)
+        const waga = parseFloat(sztuka.waga)
         const netto = waga * cenaZaKg
         const vat = netto * STAWKA_VAT
         const brutto = netto + vat
-        
+
         return {
           nazwa: wybraneCiasto,
           sztuki: [sztuka],
@@ -109,12 +109,10 @@ export default function WZFormularz() {
     setWybraneWagi([])
   }
 
-  // Funkcja usuwająca pozycje z WZ
   const handleUsunPozycje = (index: number) => {
     setPozycjeWZ((prev) => prev.filter((_, i) => i !== index))
   }
 
-  // Funkcja zapisująca dokument WZ
   const handleZapiszWZ = async () => {
     if (!sklepId || pozycjeWZ.length === 0) {
       alert('Wybierz sklep i dodaj pozycje przed zapisem!')
@@ -132,7 +130,7 @@ export default function WZFormularz() {
       {
         id: uuidv4(),
         id_kierowcy: kierowcaId,
-        id_sklepu: sklepId, // Sklep musi być wybrany, aby kontynuować
+        id_sklepu: sklepId,
         data,
         pozycje: JSON.stringify(pozycjeWZ),
         zwroty_ciasta: parseFloat(zwrotyCiasta),
@@ -151,276 +149,221 @@ export default function WZFormularz() {
       console.error(error)
     } else {
       alert('✅ Dokument WZ zapisany')
-      // Oznacz użyte sztuki w załadunku
-      const uzyteIds = pozycjeWZ.flatMap(p => p.sztuki.map((s: any) => s.id))
+      const uzyteIds = pozycjeWZ.flatMap((p) => p.sztuki.map((s: any) => s.id))
       await supabase
         .from('zaladunek')
         .update({ czy_uzyte: true })
         .in('id', uzyteIds)
-      
-      // Reset formularza
       setPozycjeWZ([])
       setZwrotyCiasta('0.000')
       setZwrotyDrobnica('0.000')
-      setProdukty(prev => prev.filter(p => !uzyteIds.includes(p.id)))
+      setProdukty((prev) => prev.filter((p) => !uzyteIds.includes(p.id)))
     }
   }
 
-  // Obliczenia podsumowania
+  const unikalneCiasta = Array.from(new Set(produkty.map((p: any) => p.produkt)))
+
+  // Obliczenia finansowe
   const sumaNetto = pozycjeWZ.reduce((sum, p) => sum + p.netto, 0)
   const sumaVat = pozycjeWZ.reduce((sum, p) => sum + p.vat, 0)
   const sumaBrutto = sumaNetto + sumaVat
   const wartoscZwrotow = parseFloat(zwrotyCiasta) * CENA_ZWROT_CIASTA + parseFloat(zwrotyDrobnica) * CENA_ZWROT_DROBNICA
   const doZaplaty = sumaBrutto - wartoscZwrotow
 
-  const unikalneCiasta = Array.from(new Set(produkty.map(p => p.produkt)))
-
   return (
-    <main className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* Nagłówek */}
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-800">Dokument Wydania Zewnętrznego</h1>
-          <p className="text-gray-600">Cukiernia - System obsługi dostaw</p>
-        </header>
+    <main className="p-6 max-w-4xl mx-auto">
+      <h1 className="text-2xl font-bold mb-6">Wystaw dokument WZ</h1>
 
-        {/* Główny kontener */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Lewa kolumna - formularz */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Karta wyboru sklepu i ciasta */}
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4 text-gray-700">1. Wybierz dane</h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Wybór sklepu */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Sklep</label>
-                  <div className="relative">
-                    <select
-                      value={sklepId}
-                      onChange={(e) => setSklepId(e.target.value)}
-                      className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-lg"
-                    >
-                      <option value="">-- Wybierz sklep --</option>
-                      {sklepy.map((s) => (
-                        <option key={s.id} value={s.id}>{s.nazwa}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Lewa kolumna - formularz */}
+        <div className="space-y-6">
+          {/* Wybór sklepu */}
+          <div>
+            <label className="block mb-2 font-semibold">Wybierz sklep:</label>
+            <select
+              value={sklepId}
+              onChange={(e) => setSklepId(e.target.value)}
+              className="border p-2 w-full rounded"
+            >
+              <option value="">-- wybierz sklep --</option>
+              {sklepy.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.nazwa}
+                </option>
+              ))}
+            </select>
+          </div>
 
-                {/* Wybór ciasta */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Produkt</label>
-                  <div className="relative">
-                    <select
-                      value={wybraneCiasto}
-                      onChange={(e) => setWybraneCiasto(e.target.value)}
-                      className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-lg"
-                      disabled={unikalneCiasta.length === 0}
-                    >
-                      <option value="">-- Wybierz ciasto --</option>
-                      {unikalneCiasta.map((ciasto) => (
-                        <option key={ciasto} value={ciasto}>{ciasto}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-            </div>
+          {/* Wybór ciasta */}
+          <div>
+            <label className="block mb-2 font-semibold">Wybierz ciasto:</label>
+            <select
+              value={wybraneCiasto}
+              onChange={(e) => setWybraneCiasto(e.target.value)}
+              className="border p-2 w-full rounded"
+              disabled={unikalneCiasta.length === 0}
+            >
+              <option value="">-- wybierz ciasto --</option>
+              {unikalneCiasta.map((ciasto, idx) => (
+                <option key={idx} value={ciasto}>
+                  {ciasto}
+                </option>
+              ))}
+            </select>
+          </div>
 
-            {/* Karta dostępnych wag */}
-            {wybraneCiasto && (
-              <div className="bg-white rounded-xl shadow-md overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-200">
-                  <h2 className="text-xl font-semibold text-gray-700">2. Wybierz wagi</h2>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Dostępne sztuki: <span className="font-medium">{dostepneWagi.length}</span> • 
-                    Łączna waga: <span className="font-medium">
-                      {dostepneWagi.reduce((sum, w) => sum + Number(w.waga), 0).toFixed(3)} kg
-                    </span>
-                  </p>
-                </div>
-                
-                <div className="divide-y divide-gray-200 max-h-96 overflow-y-auto">
-                  {dostepneWagi.length > 0 ? (
-                    dostepneWagi.map((waga) => (
-                      <label 
-                        key={waga.id}
-                        htmlFor={`waga-${waga.id}`}
-                        className={`flex items-center px-6 py-3 hover:bg-blue-50 cursor-pointer ${wybraneWagi.includes(waga.id) ? 'bg-blue-50' : ''}`}
-                      >
-                        <input
-                          type="checkbox"
-                          id={`waga-${waga.id}`}
-                          checked={wybraneWagi.includes(waga.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setWybraneWagi([...wybraneWagi, waga.id])
-                            } else {
-                              setWybraneWagi(wybraneWagi.filter(id => id !== waga.id))
-                            }
-                          }}
-                          className="h-5 w-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                        />
-                        <div className="ml-4 flex-1">
-                          <div className="flex justify-between">
-                            <span className="font-medium">{waga.waga} kg</span>
-                            <span className="text-sm text-gray-500">ID: {waga.id.slice(0, 6)}...</span>
-                          </div>
-                        </div>
+          {/* Dostępne wagi */}
+          {wybraneCiasto && (
+            <div className="border p-4 rounded">
+              <h3 className="font-semibold mb-3">Dostępne wagi dla {wybraneCiasto}:</h3>
+              <div className="max-h-60 overflow-y-auto space-y-2">
+                {dostepneWagi.length > 0 ? (
+                  dostepneWagi.map((waga) => (
+                    <div key={waga.id} className="flex items-center p-2 border rounded">
+                      <input
+                        type="checkbox"
+                        id={`waga-${waga.id}`}
+                        checked={wybraneWagi.includes(waga.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setWybraneWagi([...wybraneWagi, waga.id])
+                          } else {
+                            setWybraneWagi(wybraneWagi.filter((id) => id !== waga.id))
+                          }
+                        }}
+                        className="mr-3"
+                      />
+                      <label htmlFor={`waga-${waga.id}`} className="flex-1">
+                        {waga.waga} kg
                       </label>
-                    ))
-                  ) : (
-                    <div className="px-6 py-8 text-center text-gray-500">
-                      Brak dostępnych wag dla wybranego produktu
                     </div>
-                  )}
-                </div>
-
-                {wybraneWagi.length > 0 && (
-                  <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end">
-                    <button
-                      onClick={handleZatwierdzWagi}
-                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                    >
-                      Dodaj wybrane ({wybraneWagi.length})
-                    </button>
-                  </div>
+                  ))
+                ) : (
+                  <p className="text-gray-500">Brak dostępnych wag</p>
                 )}
               </div>
-            )}
+              {wybraneWagi.length > 0 && (
+                <button
+                  onClick={handleZatwierdzWagi}
+                  className="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                >
+                  Dodaj wybrane wagi
+                </button>
+              )}
+            </div>
+          )}
 
-            {/* Karta zwrotów */}
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4 text-gray-700">3. Zwroty</h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Zwrot ciast (kg)</label>
-                  <div className="mt-1 relative rounded-md shadow-sm">
-                    <input
-                      type="number"
-                      value={zwrotyCiasta}
-                      onChange={(e) => setZwrotyCiasta(e.target.value)}
-                      className="focus:ring-blue-500 focus:border-blue-500 block w-full pl-3 pr-12 py-2 sm:text-sm border-gray-300 rounded-md"
-                      step="0.001"
-                      min="0"
-                    />
-                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                      <span className="text-gray-500 sm:text-sm">kg</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Zwrot drobnicy (kg)</label>
-                  <div className="mt-1 relative rounded-md shadow-sm">
-                    <input
-                      type="number"
-                      value={zwrotyDrobnica}
-                      onChange={(e) => setZwrotyDrobnica(e.target.value)}
-                      className="focus:ring-blue-500 focus:border-blue-500 block w-full pl-3 pr-12 py-2 sm:text-sm border-gray-300 rounded-md"
-                      step="0.001"
-                      min="0"
-                    />
-                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                      <span className="text-gray-500 sm:text-sm">kg</span>
-                    </div>
-                  </div>
-                </div>
+          {/* Zwroty */}
+          <div className="border p-4 rounded">
+            <h3 className="font-semibold mb-3">Zwroty:</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block mb-1">Ciasta (kg):</label>
+                <input
+                  type="number"
+                  value={zwrotyCiasta}
+                  onChange={(e) => setZwrotyCiasta(e.target.value)}
+                  step="0.001"
+                  min="0"
+                  className="border p-2 w-full rounded"
+                />
+              </div>
+              <div>
+                <label className="block mb-1">Drobnica (kg):</label>
+                <input
+                  type="number"
+                  value={zwrotyDrobnica}
+                  onChange={(e) => setZwrotyDrobnica(e.target.value)}
+                  step="0.001"
+                  min="0"
+                  className="border p-2 w-full rounded"
+                />
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Prawa kolumna - podsumowanie */}
-          <div className="space-y-6">
-            {/* Karta podglądu WZ */}
-            <div className="bg-white rounded-xl shadow-md overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h2 className="text-xl font-semibold text-gray-700">Podgląd dokumentu</h2>
-              </div>
-
-              {pozycjeWZ.length > 0 ? (
-                <div className="divide-y divide-gray-200">
+        {/* Prawa kolumna - podgląd WZ */}
+        <div className="space-y-6">
+          {/* Lista pozycji WZ */}
+          {pozycjeWZ.length > 0 ? (
+            <div className="border rounded overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="p-3 text-left">Nazwa</th>
+                    <th className="p-3 text-right">Waga (kg)</th>
+                    <th className="p-3 text-right">Cena/kg</th>
+                    <th className="p-3 text-right">Netto</th>
+                    <th className="p-3 text-right">VAT</th>
+                    <th className="p-3 text-right">Brutto</th>
+                    <th className="p-3"></th>
+                  </tr>
+                </thead>
+                <tbody>
                   {pozycjeWZ.map((pozycja, index) => (
-                    <div key={index} className="px-6 py-4 hover:bg-gray-50">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <h3 className="font-medium text-gray-900">{pozycja.nazwa}</h3>
-                          <p className="text-sm text-gray-500 mt-1">
-                            {pozycja.waga.toFixed(3)} kg × {pozycja.cenaZaKg.toFixed(2)} zł
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-medium">{pozycja.brutto.toFixed(2)} zł</p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            netto: {pozycja.netto.toFixed(2)} zł
-                          </p>
-                        </div>
-                      </div>
-                      <div className="mt-2 flex justify-end">
+                    <tr key={index} className="hover:bg-gray-50 border-t">
+                      <td className="p-3">{pozycja.nazwa}</td>
+                      <td className="p-3 text-right">{pozycja.waga.toFixed(3)} kg</td>
+                      <td className="p-3 text-right">{pozycja.cenaZaKg.toFixed(2)} zł</td>
+                      <td className="p-3 text-right">{pozycja.netto.toFixed(2)} zł</td>
+                      <td className="p-3 text-right">{pozycja.vat.toFixed(2)} zł</td>
+                      <td className="p-3 text-right">{pozycja.brutto.toFixed(2)} zł</td>
+                      <td className="p-3 text-right">
                         <button
                           onClick={() => handleUsunPozycje(index)}
-                          className="text-red-600 hover:text-red-900"
+                          className="text-red-500 hover:text-red-700"
                         >
                           Usuń
                         </button>
-                      </div>
-                    </div>
+                      </td>
+                    </tr>
                   ))}
-                </div>
-              ) : (
-                <div className="px-6 py-8 text-center text-gray-500">
-                  Brak dodanych pozycji
-                </div>
-              )}
+                </tbody>
+              </table>
             </div>
+          ) : (
+            <div className="border p-4 rounded text-center text-gray-500">
+              Brak dodanych pozycji
+            </div>
+          )}
 
-            {/* Karta podsumowania */}
-            <div className="bg-white rounded-xl shadow-md overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                <h2 className="text-xl font-semibold text-gray-700">Podsumowanie</h2>
+          {/* Podsumowanie */}
+          <div className="border p-4 rounded bg-gray-50">
+            <h3 className="font-semibold mb-3">Podsumowanie:</h3>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span>Wartość netto:</span>
+                <span>{sumaNetto.toFixed(2)} zł</span>
               </div>
-
-              <div className="px-6 py-4 space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Wartość netto:</span>
-                  <span className="font-medium">{sumaNetto.toFixed(2)} zł</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">VAT ({STAWKA_VAT * 100}%):</span>
-                  <span className="font-medium">{sumaVat.toFixed(2)} zł</span>
-                </div>
-                <div className="flex justify-between pt-2 border-t border-gray-200">
-                  <span className="text-gray-600 font-medium">Wartość brutto:</span>
-                  <span className="font-medium text-blue-600">{sumaBrutto.toFixed(2)} zł</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Wartość zwrotów:</span>
-                  <span className="font-medium text-red-600">-{wartoscZwrotow.toFixed(2)} zł</span>
-                </div>
-                <div className="flex justify-between pt-2 border-t border-gray-200">
-                  <span className="text-gray-900 font-bold">Do zapłaty:</span>
-                  <span className="text-xl font-bold text-green-600">{doZaplaty.toFixed(2)} zł</span>
-                </div>
+              <div className="flex justify-between">
+                <span>VAT ({STAWKA_VAT * 100}%):</span>
+                <span>{sumaVat.toFixed(2)} zł</span>
               </div>
-
-              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
-                <button
-                  onClick={handleZapiszWZ}
-                  disabled={!sklepId || pozycjeWZ.length === 0}
-                  className={`w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-lg font-medium text-white ${
-                    !sklepId || pozycjeWZ.length === 0
-                      ? 'bg-gray-400 cursor-not-allowed'
-                      : 'bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500'
-                  }`}
-                >
-                  Zatwierdź dokument
-                </button>
+              <div className="flex justify-between border-t pt-2 font-medium">
+                <span>Wartość brutto:</span>
+                <span>{sumaBrutto.toFixed(2)} zł</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Wartość zwrotów:</span>
+                <span>-{wartoscZwrotow.toFixed(2)} zł</span>
+              </div>
+              <div className="flex justify-between border-t pt-2 font-bold">
+                <span>Do zapłaty:</span>
+                <span>{doZaplaty.toFixed(2)} zł</span>
               </div>
             </div>
+            <button
+              onClick={handleZapiszWZ}
+              disabled={!sklepId || pozycjeWZ.length === 0}
+              className={`mt-4 w-full py-2 rounded text-white ${
+                !sklepId || pozycjeWZ.length === 0
+                  ? 'bg-gray-400 cursor-not-allowed'
+                  : 'bg-green-600 hover:bg-green-700'
+              }`}
+            >
+              Zapisz dokument WZ
+            </button>
           </div>
         </div>
       </div>
