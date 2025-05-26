@@ -7,20 +7,20 @@ export default function Dashboard() {
       <h1 className="text-2xl font-bold mb-8">System Cukierni</h1>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Sekcja załadunków */}
+        {/* Sekcja magazynów */}
         <div className="border rounded-lg p-6">
-          <h2 className="text-xl font-semibold mb-4">Załadunki</h2>
+          <h2 className="text-xl font-semibold mb-4">Magazyn</h2>
           <Link 
-            href="/zaladunki"
+            href="/magazyn"
             className="inline-block bg-blue-600 text-white px-4 py-2 rounded mb-4"
           >
-            Utwórz nowy załadunek
+            Utwórz nowy magazyn
           </Link>
           <Link 
-            href="/zaladunki/historia"
+            href="/magazyn/historia"
             className="block text-blue-600 hover:underline"
           >
-            Historia załadunków →
+            Historia magazynów →
           </Link>
         </div>
 

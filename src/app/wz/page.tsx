@@ -1,83 +1,100 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { supabase } from '../../supabaseClient'
+import React, { useEffect, useState } from 'react'
+import { supabase } from '@/supabaseClient'
 import { v4 as uuidv4 } from 'uuid'
 
 export default function WZFormularz() {
   const [isClient, setIsClient] = useState(false)
-  const kierowcaId = '70e2c26d-63cd-4a52-9580-d7ee5437413b' // stałe ID kierowcy
+  const kierowcaId = '70e2c26d-63cd-4a52-9580-d7ee5437413b'
   const CENA_ZWROT_CIASTA = 24.60
   const CENA_ZWROT_DROBNICA = 40.00
-  const STAWKA_VAT = 0.05 // Poprawiono na dokładne 5%
+  const STAWKA_VAT = 0.05
 
+  // Stany
   const [sklepy, setSklepy] = useState<{ id: string; nazwa: string }[]>([])
   const [produkty, setProdukty] = useState<any[]>([])
   const [ceny, setCeny] = useState<Record<string, number>>({})
   const [sklepId, setSklepId] = useState<string>('')
   const [wybraneCiasto, setWybraneCiasto] = useState<string>('')
   const [dostepneWagi, setDostepneWagi] = useState<any[]>([])
-  const [wybraneWagi, setWybraneWagi] = useState<string[]>([])
   const [pozycjeWZ, setPozycjeWZ] = useState<any[]>([])
   const [zwrotyCiasta, setZwrotyCiasta] = useState('0.000')
   const [zwrotyDrobnica, setZwrotyDrobnica] = useState('0.000')
-  const [formaPlatnosci, setFormaPlatnosci] = useState<'gotowka' | 'przelew'>('gotowka')
 
+  // Pobierz dane przy montowaniu
   useEffect(() => {
-    setIsClient(true)
-
     const fetchDane = async () => {
-      // Pobierz sklepy
-      const { data: sklepyData } = await supabase.from('sklepy').select('id, nazwa')
-      setSklepy(sklepyData || [])
+      try {
+        // 1. Sklepy
+        const { data: sklepyData } = await supabase.from('sklepy').select('id, nazwa')
+        setSklepy(sklepyData || [])
 
-      // Pobierz załadunki nieużyte dla tego kierowcy
-      const { data: zaladunekData } = await supabase
-        .from('zaladunek')
-        .select('*')
-        .eq('id_kierowcy', kierowcaId)
-        .eq('czy_uzyte', false)
+        // 2. Ceny netto
+        const { data: cenyData } = await supabase.from('ceny').select('produkt, cena_netto')
+        const mapaCen = (cenyData || []).reduce((acc, curr) => {
+          acc[curr.produkt.trim().toLowerCase()] = Number(curr.cena_netto)
+          return acc
+        }, {} as Record<string, number>)
+        setCeny(mapaCen)
 
-      if (!zaladunekData || zaladunekData.length === 0) {
-        console.log('Brak danych załadunku')
-        return
+        // 3. Załadunki – teraz tabela magazyn
+        const { data: magazynData, error } = await supabase
+          .from('magazyn')         // ✅ Tabela "magazyn"
+          .select('*')
+          .eq('kierowca_id', kierowcaId) // ✅ Używamy "kierowca_id", NIE "id_kierowcy"
+          .eq('czy_uzyte', false)
+
+        if (error) {
+          console.error('Błąd pobierania magazynu:', error)
+          alert('Nie można pobrać danych – sprawdź połączenie')
+          return
+        }
+
+        if (!magazynData || magazynData.length === 0) {
+          alert('Brak danych załadunku')
+          setProdukty([])
+          return
+        }
+
+        // 4. Najnowsza data
+        const ostatniaData = magazynData.reduce(
+          (naj, curr) => (curr.data > naj ? curr.data : naj),
+          magazynData[0].data
+        )
+
+        // 5. Filtruj tylko sztuki z najnowszego dnia
+        const tylkoOstatni = magazynData.filter(p => p.data === ostatniaData)
+        setProdukty(tylkoOstatni)
+
+      } catch (err) {
+        console.error('Krytyczny błąd:', err)
+        alert('Wystąpił błąd podczas ładowania danych')
       }
-
-      // Weź najnowszy załadunek po dacie
-      const ostatniaData = zaladunekData.reduce((naj, curr) =>
-        curr.data > naj ? curr.data : naj,
-        zaladunekData[0].data
-      )
-      const tylkoOstatnie = zaladunekData.filter((z) => z.data === ostatniaData)
-      setProdukty(tylkoOstatnie)
-
-      // Pobierz ceny netto produktów
-      const { data: cenyData } = await supabase.from('ceny').select('produkt, cena_netto')
-      const mapaCen = (cenyData || []).reduce((acc, curr) => {
-        acc[curr.produkt.trim().toLowerCase()] = Number(curr.cena_netto)
-        return acc
-      }, {} as Record<string, number>)
-      setCeny(mapaCen)
     }
 
     fetchDane()
+    setIsClient(true)
   }, [])
 
-  // Filtruj dostępne wagi po wybraniu ciasta
+  // Filtruj dostępne wagi po wybranym ciastku
   useEffect(() => {
-    if (wybraneCiasto) {
+    if (wybraneCiasto && produkty.length > 0) {
       const wagiDlaCiasta = produkty.filter(
-        (p) => p.produkt === wybraneCiasto && !pozycjeWZ.some((wz) => wz.sztuki.some((s: any) => s.id === p.id))
+        (p) =>
+          p.produkt_id === wybraneCiasto &&
+          !pozycjeWZ.some((wz) => wz.sztuki.some((s: any) => s.id === p.id))
       )
       setDostepneWagi(wagiDlaCiasta)
-      setWybraneWagi([])
+    } else {
+      setDostepneWagi([])
     }
   }, [wybraneCiasto, produkty, pozycjeWZ])
 
   if (!isClient) return null
 
   const handleZatwierdzWagi = () => {
-    if (!wybraneCiasto || wybraneWagi.length === 0) return
+    if (!wybraneCiasto || dostepneWagi.length === 0) return
 
     const klucz = Object.keys(ceny).find(
       (key) => key.trim().toLowerCase() === wybraneCiasto.trim().toLowerCase()
@@ -85,37 +102,30 @@ export default function WZFormularz() {
 
     const cenaZaKg = klucz ? ceny[klucz] : 0
 
-    const nowePozycje = dostepneWagi
-      .filter((w) => wybraneWagi.includes(w.id))
-      .map((sztuka) => {
-        const waga = parseFloat(sztuka.waga)
-        const netto = waga * cenaZaKg
-        const vat = netto * STAWKA_VAT
-        const brutto = netto + vat
+    const nowePozycje = dostepneWagi.map((sztuka) => {
+      const waga = parseFloat(sztuka.waga)
+      const netto = waga * cenaZaKg
+      const vat = netto * STAWKA_VAT
+      const brutto = netto + vat
 
-        return {
-          nazwa: wybraneCiasto,
-          sztuki: [sztuka],
-          waga,
-          cenaZaKg,
-          netto,
-          vat,
-          brutto
-        }
-      })
+      return {
+        nazwa: wybraneCiasto,
+        sztuki: [sztuka],
+        waga,
+        cenaZaKg,
+        netto,
+        vat,
+        brutto
+      }
+    })
 
     setPozycjeWZ((prev) => [...prev, ...nowePozycje])
     setWybraneCiasto('')
-    setWybraneWagi([])
-  }
-
-  const handleUsunPozycje = (index: number) => {
-    setPozycjeWZ((prev) => prev.filter((_, i) => i !== index))
   }
 
   const handleZapiszWZ = async () => {
     if (!sklepId || pozycjeWZ.length === 0) {
-      alert('Wybierz sklep i dodaj pozycje przed zapisem!')
+      alert('Wybierz sklep i dodaj pozycję przed zapisem!')
       return
     }
 
@@ -123,10 +133,14 @@ export default function WZFormularz() {
     const sumaNetto = pozycjeWZ.reduce((sum, p) => sum + p.netto, 0)
     const sumaVat = pozycjeWZ.reduce((sum, p) => sum + p.vat, 0)
     const sumaBrutto = sumaNetto + sumaVat
-    const wartoscZwrotow = parseFloat(zwrotyCiasta) * CENA_ZWROT_CIASTA + parseFloat(zwrotyDrobnica) * CENA_ZWROT_DROBNICA
-    const kwotaDoZaplaty = sumaBrutto - wartoscZwrotow
+    const wartoscZwrotow =
+      (parseFloat(zwrotyCiasta) || 0) * CENA_ZWROT_CIASTA +
+      (parseFloat(zwrotyDrobnica) || 0) * CENA_ZWROT_DROBNICA
+    const doZaplaty = sumaBrutto - wartoscZwrotow
+    const uzyteIds = pozycjeWZ.flatMap((p) => p.sztuki.map((s: any) => s.id))
 
-    const { error } = await supabase.from('wz_dokumenty').insert([
+    // Zapisz dokument WZ
+    const { error: insertError } = await supabase.from('wz_dokumenty').insert([
       {
         id: uuidv4(),
         id_kierowcy: kierowcaId,
@@ -135,40 +149,53 @@ export default function WZFormularz() {
         pozycje: JSON.stringify(pozycjeWZ),
         zwroty_ciasta: parseFloat(zwrotyCiasta),
         zwroty_drobnica: parseFloat(zwrotyDrobnica),
-        forma_platnosci: formaPlatnosci,
+        forma_platnosci: 'gotowka',
         suma_netto: sumaNetto,
         suma_vat: sumaVat,
         suma_brutto: sumaBrutto,
         wartosc_zwrotow: wartoscZwrotow,
-        do_zaplaty: kwotaDoZaplaty
+        do_zaplaty: doZaplaty
       }
     ])
 
-    if (error) {
+    if (insertError) {
       alert('❌ Błąd zapisu dokumentu WZ')
-      console.error(error)
-    } else {
-      alert('✅ Dokument WZ zapisany')
-      const uzyteIds = pozycjeWZ.flatMap((p) => p.sztuki.map((s: any) => s.id))
-      await supabase
-        .from('zaladunek')
-        .update({ czy_uzyte: true })
-        .in('id', uzyteIds)
-      setPozycjeWZ([])
-      setZwrotyCiasta('0.000')
-      setZwrotyDrobnica('0.000')
-      setProdukty((prev) => prev.filter((p) => !uzyteIds.includes(p.id)))
+      console.error(insertError)
+      return
     }
-  }
 
-  const unikalneCiasta = Array.from(new Set(produkty.map((p: any) => p.produkt)))
+    // Oznacz użyte sztuki jako "czy_uzyte = true"
+    const { error: updateError } = await supabase
+      .from('magazyn')
+      .update({ czy_uzyte: true })
+      .in('id', uzyteIds)
+
+    if (updateError) {
+      alert('⚠️ Błąd aktualizacji stanu magazynowego')
+      console.error(updateError)
+    }
+
+    // Odśwież lokalny stan
+    setProdukty((prev) => prev.filter((p) => !uzyteIds.includes(p.id)))
+    setPozycjeWZ([])
+    setZwrotyCiasta('0.000')
+    setZwrotyDrobnica('0.000')
+    alert('✅ Dokument WZ zapisany!')
+  }
 
   // Obliczenia finansowe
   const sumaNetto = pozycjeWZ.reduce((sum, p) => sum + p.netto, 0)
   const sumaVat = pozycjeWZ.reduce((sum, p) => sum + p.vat, 0)
   const sumaBrutto = sumaNetto + sumaVat
-  const wartoscZwrotow = parseFloat(zwrotyCiasta) * CENA_ZWROT_CIASTA + parseFloat(zwrotyDrobnica) * CENA_ZWROT_DROBNICA
+  const wartoscZwrotow =
+    (parseFloat(zwrotyCiasta) || 0) * CENA_ZWROT_CIASTA +
+    (parseFloat(zwrotyDrobnica) || 0) * CENA_ZWROT_DROBNICA
   const doZaplaty = sumaBrutto - wartoscZwrotow
+
+  // Generowanie listy unikalnych ciast
+  const unikalneCiasta = produkty.length > 0
+    ? Array.from(new Set(produkty.map((p: any) => p.produkt_id?.trim()).filter(Boolean)))
+    : []
 
   return (
     <main className="p-6 max-w-4xl mx-auto">
@@ -217,39 +244,26 @@ export default function WZFormularz() {
             <div className="border p-4 rounded">
               <h3 className="font-semibold mb-3">Dostępne wagi dla {wybraneCiasto}:</h3>
               <div className="max-h-60 overflow-y-auto space-y-2">
-                {dostepneWagi.length > 0 ? (
-                  dostepneWagi.map((waga) => (
+                {produkty
+                  .filter(p => p.produkt_id === wybraneCiasto)
+                  .map((waga) => (
                     <div key={waga.id} className="flex items-center p-2 border rounded">
                       <input
                         type="checkbox"
-                        id={`waga-${waga.id}`}
-                        checked={wybraneWagi.includes(waga.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setWybraneWagi([...wybraneWagi, waga.id])
-                          } else {
-                            setWybraneWagi(wybraneWagi.filter((id) => id !== waga.id))
-                          }
-                        }}
+                        checked={true}
+                        onChange={() => {}}
                         className="mr-3"
                       />
-                      <label htmlFor={`waga-${waga.id}`} className="flex-1">
-                        {waga.waga} kg
-                      </label>
+                      <span>{waga.waga} kg</span>
                     </div>
-                  ))
-                ) : (
-                  <p className="text-gray-500">Brak dostępnych wag</p>
-                )}
+                  ))}
               </div>
-              {wybraneWagi.length > 0 && (
-                <button
-                  onClick={handleZatwierdzWagi}
-                  className="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-                >
-                  Dodaj wybrane wagi
-                </button>
-              )}
+              <button
+                onClick={handleZatwierdzWagi}
+                className="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+              >
+                Dodaj wszystkie wagi
+              </button>
             </div>
           )}
 
@@ -297,7 +311,6 @@ export default function WZFormularz() {
                     <th className="p-3 text-right">Netto</th>
                     <th className="p-3 text-right">VAT</th>
                     <th className="p-3 text-right">Brutto</th>
-                    <th className="p-3"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -309,14 +322,6 @@ export default function WZFormularz() {
                       <td className="p-3 text-right">{pozycja.netto.toFixed(2)} zł</td>
                       <td className="p-3 text-right">{pozycja.vat.toFixed(2)} zł</td>
                       <td className="p-3 text-right">{pozycja.brutto.toFixed(2)} zł</td>
-                      <td className="p-3 text-right">
-                        <button
-                          onClick={() => handleUsunPozycje(index)}
-                          className="text-red-500 hover:text-red-700"
-                        >
-                          Usuń
-                        </button>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -340,15 +345,15 @@ export default function WZFormularz() {
                 <span>VAT ({STAWKA_VAT * 100}%):</span>
                 <span>{sumaVat.toFixed(2)} zł</span>
               </div>
-              <div className="flex justify-between border-t pt-2 font-medium">
+              <div className="flex justify-between pt-2 border-t font-medium">
                 <span>Wartość brutto:</span>
                 <span>{sumaBrutto.toFixed(2)} zł</span>
               </div>
               <div className="flex justify-between">
-                <span>Wartość zwrotów:</span>
+                <span>Zwroty:</span>
                 <span>-{wartoscZwrotow.toFixed(2)} zł</span>
               </div>
-              <div className="flex justify-between border-t pt-2 font-bold">
+              <div className="flex justify-between pt-2 border-t font-bold">
                 <span>Do zapłaty:</span>
                 <span>{doZaplaty.toFixed(2)} zł</span>
               </div>
