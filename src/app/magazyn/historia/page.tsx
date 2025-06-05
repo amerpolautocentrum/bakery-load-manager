@@ -91,43 +91,42 @@ export default function HistoriaMagazynu() {
   }, [])
 
   if (isLoading) return <div className="p-6 text-center">Ładowanie...</div>
+return (
+  <div className="p-4 max-w-md mx-auto">
+    <h1 className="text-xl font-bold mb-6">Historia magazynu</h1>
+    
+    {dni.length === 0 ? (
+      <p className="text-gray-500">Brak danych</p>
+    ) : (
+      <div className="space-y-4">
+        {dni.map((dzien, index) => (
+          <div key={index} className="bg-white p-4 rounded-lg shadow">
+            <h2 className="font-semibold">{dzien.data}</h2>
+            <p className="text-sm text-gray-600 mb-2">Kierowca: {dzien.kierowca}</p>
+            
+            <ul className="mt-2 space-y-2">
+              {dzien.ciasta.map((ciasto, idx) => (
+                <li key={idx} className="flex justify-between">
+                  <span>{ciasto.produkt_id}</span>
+                  <span>{ciasto.ilosc} × {ciasto.waga} kg</span>
+                </li>
+              ))}
+            </ul>
 
-  return (
-    <div className="p-4 max-w-md mx-auto">
-      <h1 className="text-xl font-bold mb-6">Historia magazynu</h1>
-      
-      {dni.length === 0 ? (
-        <p className="text-gray-500">Brak danych</p>
-      ) : (
-        <div className="space-y-4">
-          {dni.map((dzien, index) => (
-            <div key={index} className="bg-white p-4 rounded-lg shadow">
-              <h2 className="font-semibold">{dzien.data}</h2>
-              <p className="text-sm text-gray-600 mb-2">Kierowca: {dzien.kierowca}</p>
-              
-              <ul className="mt-2 space-y-2">
-                {dzien.ciasta.map((ciasto, idx) => (
-                  <li key={idx} className="flex justify-between">
-                    <span>{ciasto.produkt_id}</span>
-                    <span>{ciasto.ilosc} × {ciasto.waga} kg</span>
-                  </li>
-                ))}
-              </ul>
-              
-              <Link 
-                href={`/magazyn/historia/${dzien.data}`}
-                className="inline-block mt-3 text-blue-600 text-sm"
-              >
-                Szczegóły →
-              </Link>
-            </div>
-          ))}
-        </div>
-      )}
+            <Link
+              href={`/magazyn/historia/${encodeURIComponent(`${dzien.data}___${Object.keys(kierowcy).find(id => kierowcy[id] === dzien.kierowca)}`)}`}
+              className="inline-block mt-3 text-blue-600 text-sm"
+            >
+              Szczegóły →
+            </Link>
+          </div>
+        ))}
+      </div>
+    )}
 
-      <Link href="/magazyn" className="inline-block mt-6 text-blue-600">
-        ← Powrót
-      </Link>
-    </div>
-  )
+    <Link href="/magazyn" className="inline-block mt-6 text-blue-600">
+      ← Powrót
+    </Link>
+  </div>
+)  
 }

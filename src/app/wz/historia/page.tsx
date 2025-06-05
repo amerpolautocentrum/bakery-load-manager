@@ -7,76 +7,93 @@ import { useRouter } from 'next/navigation'
 
 type WZDokument = {
   id: string
-  id_kierowcy: string
-  id_sklepu: string
+  kierowca_id: string  // Poprawione z id_kierowcy
+  sklep_id: string     // Poprawione z id_sklepu
   data: string
-  pozycje: string
+  pozycje: any
   forma_platnosci: 'gotowka' | 'przelew'
   suma_brutto: number
-}
-
-type Kierowca = {
-  id: string
-  imie: string
-  nazwisko: string
+  created_at: string
 }
 
 export default function HistoriaWZ() {
   const [dni, setDni] = useState<{ data: string; liczba: number; kierowca: string }[]>([])
-  const [kierowcyMap, setKierowcyMap] = useState<Record<string, string>>({})
-  const router = useRouter()
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     const fetchData = async () => {
-      const { data: dokumenty } = await supabase
-        .from('wz_dokumenty')
-        .select('*')
-        .order('data', { ascending: false })
+      try {
+        setLoading(true)
+        setError('')
 
-      if (!dokumenty) return
+        // Pobierz dokumenty z sortowaniem
+        const { data: dokumenty, error: dokumentyError } = await supabase
+          .from('wz_dokumenty')
+          .select('*')
+          .order('data', { ascending: false })
+          .order('created_at', { ascending: false })
 
-      // Pobierz kierowców
-      const { data: kierowcyData } = await supabase.from('kierowcy').select('id, imie, nazwisko')
+        if (dokumentyError) throw dokumentyError
+        if (!dokumenty) return
 
-      // Utwórz mapę kierowców
-      const kierowcyMap = kierowcyData?.reduce((acc: Record<string, string>, k) => {
-        acc[k.id] = `${k.imie} ${k.nazwisko}`
-        return acc
-      }, {}) || {}
+        // Pobierz kierowców
+        const { data: kierowcyData, error: kierowcyError } = await supabase
+          .from('kierowcy')
+          .select('id, imie, nazwisko')
 
-      setKierowcyMap(kierowcyMap)
+        if (kierowcyError) throw kierowcyError
 
-      // Grupuj dokumenty po dacie
-      const dniMap = new Map<string, { data: string; liczba: number; kierowca_id: string }>()
+        // Utwórz mapę kierowców
+        const kierowcyMap = kierowcyData?.reduce((acc: Record<string, string>, k) => {
+          acc[k.id] = `${k.imie} ${k.nazwisko}`
+          return acc
+        }, {}) || {}
 
-      dokumenty.forEach((doc) => {
-        const key = doc.data // np. "2025-05-19"
-        if (!dniMap.has(key)) {
-          dniMap.set(key, {
-            data: key,
-            liczba: 1,
-            kierowca_id: doc.id_kierowcy
-          })
-        } else {
-          const aktualne = dniMap.get(key)!
-          dniMap.set(key, {
-            ...aktualne,
-            liczba: aktualne.liczba + 1
-          })
-        }
-      })
+        // Grupuj dokumenty po dacie
+        const dniMap = new Map<string, { 
+          data: string; 
+          liczba: number; 
+          kierowca_id: string 
+        }>()
 
-      const wynik = Array.from(dniMap.entries()).map(([data, info]) => ({
-        data,
-        liczba: info.liczba,
-        kierowca: kierowcyMap[info.kierowca_id] || 'Nieznany kierowca'
-      }))
+        dokumenty.forEach((doc: WZDokument) => {
+          const key = doc.data
+          if (!dniMap.has(key)) {
+            dniMap.set(key, {
+              data: key,
+              liczba: 1,
+              kierowca_id: doc.kierowca_id  // Poprawione z id_kierowcy
+            })
+          } else {
+            const aktualne = dniMap.get(key)!
+            dniMap.set(key, {
+              ...aktualne,
+              liczba: aktualne.liczba + 1
+            })
+          }
+        })
 
-      setDni(wynik)
+        const wynik = Array.from(dniMap.values()).map(info => ({
+          data: info.data,
+          liczba: info.liczba,
+          kierowca: kierowcyMap[info.kierowca_id] || 'Nieznany kierowca'
+        }))
+
+        setDni(wynik)
+      } catch (err) {
+        console.error('Błąd pobierania danych:', err)
+        setError('Wystąpił błąd podczas ładowania historii')
+      } finally {
+        setLoading(false)
+      }
     }
 
     fetchData()
   }, [])
+
+  if (loading) return <div className="p-6 text-center">Ładowanie historii...</div>
+  if (error) return <div className="p-6 text-red-600">{error}</div>
 
   return (
     <div className="p-6 max-w-xl mx-auto">
@@ -87,15 +104,25 @@ export default function HistoriaWZ() {
       ) : (
         <div className="space-y-3">
           {dni.map((dzien, index) => (
-            <Link key={index} href={`/wz/historia/${dzien.data}`}>
+            <Link 
+              key={index} 
+              href={`/wz/historia/${dzien.data}`}
+              passHref
+            >
               <div className="border p-4 rounded-lg hover:bg-gray-50 cursor-pointer">
                 <div className="flex justify-between items-center">
                   <span className="font-medium">
-                    {new Date(dzien.data).toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                    {new Date(dzien.data).toLocaleDateString('pl-PL', { 
+                      day: '2-digit', 
+                      month: '2-digit', 
+                      year: 'numeric' 
+                    })}
                   </span>
                   <div className="text-right">
                     <span className="block text-sm">{dzien.kierowca}</span>
-                    <span className="text-md font-semibold text-blue-600">{dzien.liczba} dokumentów</span>
+                    <span className="text-md font-semibold text-blue-600">
+                      {dzien.liczba} {dzien.liczba === 1 ? 'dokument' : 'dokumenty'}
+                    </span>
                   </div>
                 </div>
               </div>

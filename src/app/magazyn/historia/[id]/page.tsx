@@ -15,13 +15,13 @@ export default function SzczegolyMagazynu() {
     const fetchData = async () => {
       setIsLoading(true)
       try {
-        const dzien = decodeURIComponent(params.id as string)
+        const [data, kierowcaId] = decodeURIComponent(params.id as string).split('___')
 
-        // 1. Pobierz WSZYSTKIE sztuki z tej daty
         const { data: magazynData, error: magazynError } = await supabase
           .from('magazyn')
           .select('*')
-          .eq('data', dzien)
+          .eq('data', data)
+          .eq('kierowca_id', kierowcaId)
 
         if (magazynError) throw magazynError
         if (!magazynData || magazynData.length === 0) {
@@ -29,16 +29,13 @@ export default function SzczegolyMagazynu() {
           return
         }
 
-        // 2. Najnowsza wersja załadunku dla tego dnia
         const najnowszaWersja = magazynData.reduce((acc, curr) => {
           if (!acc || curr.updated_at > acc.updated_at) return curr
           return acc
         }, magazynData[0])
 
-        // 3. Filtruj tylko sztuki z najnowszej wersji
         const najnowszyMagazyn = magazynData.filter(item => item.wersja === najnowszaWersja.wersja)
 
-        // 4. Pobierz dane kierowcy
         const { data: kierowcaData } = await supabase
           .from('kierowcy')
           .select('imie, nazwisko')
@@ -46,8 +43,6 @@ export default function SzczegolyMagazynu() {
           .single()
 
         setKierowca(kierowcaData ? `${kierowcaData.imie} ${kierowcaData.nazwisko}` : 'Nieznany kierowca')
-
-        // 5. Ustaw sztuki
         setSztuki(najnowszyMagazyn)
 
       } catch (error) {
@@ -63,7 +58,6 @@ export default function SzczegolyMagazynu() {
 
   if (isLoading) return <div className="p-6 text-center">Ładowanie...</div>
 
-  // Grupowanie po ciastach
   const grouped = sztuki.reduce((acc, item) => {
     const key = `${item.produkt_id}-${item.waga}`
     if (!acc[key]) {
@@ -79,12 +73,17 @@ export default function SzczegolyMagazynu() {
 
   return (
     <div className="p-4 max-w-md mx-auto">
-      <h1 className="text-xl font-bold mb-4">Magazyn z dnia {params.id}</h1>
-      {kierowca && <p className="mb-4">Kierowca: <span className="font-medium">{kierowca}</span></p>}
+      <div className="flex flex-col md:flex-row gap-4 mb-4">
+        <Link href="/admin/kierowcy" className="text-blue-600 hover:underline">
+          ← Wróć do listy kierowców
+        </Link>
+        <Link href="/dashboard" className="text-blue-600 hover:underline">
+          ← Powrót do panelu administratora
+        </Link>
+      </div>
 
-      <Link href="/magazyn/historia" className="text-blue-600 inline-block mb-4">
-        ← Wróć do historii
-      </Link>
+      <h1 className="text-xl font-bold mb-4">Magazyn z dnia {params.id?.split('___')[0]}</h1>
+      {kierowca && <p className="mb-4">Kierowca: <span className="font-medium">{kierowca}</span></p>}
 
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <table className="min-w-full">
