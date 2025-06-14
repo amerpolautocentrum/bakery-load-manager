@@ -1,4 +1,5 @@
 'use client'
+
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
@@ -12,35 +13,46 @@ export default function Login() {
   const router = useRouter()
   const supabase = createClientComponentClient()
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
+ const handleLogin = async (e: React.FormEvent) => {
+  e.preventDefault()
+  setLoading(true)
+  setError('')
 
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      })
-      
-      if (error) {
-        setError(error.message)
-      } else {
-        router.push('/dashboard') // Przekierowanie po zalogowaniu
-        router.refresh() // Wymuszenie odświeżenia stanu
-      }
-    } catch (err) {
-      setError('Wystąpił nieoczekiwany błąd')
-    } finally {
-      setLoading(false)
-    }
+  try {
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    })
+
+    if (signInError) throw signInError
+
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError || !session) throw sessionError || new Error('Brak sesji')
+
+    const rola = session.user.user_metadata?.rola || ''
+    const redirectPath =
+      rola === 'produkcja' ? '/produkcja' :
+      rola === 'kierowca' ? '/wz' :
+      rola === 'admin' ? '/admin' : '/'
+
+    window.location.href = redirectPath
+
+  } catch (err) {
+    setError(err instanceof Error ? err.message : 'Wystąpił nieoczekiwany błąd')
+    console.error('Błąd logowania:', err)
+  } finally {
+    setLoading(false)
   }
+}
+
+
+  
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="max-w-md w-full p-8 bg-white rounded-lg shadow-md">
         <h1 className="text-2xl font-bold text-center mb-6">Logowanie do systemu</h1>
-        
+
         {error && (
           <div className="mb-4 p-3 bg-red-100 text-red-700 rounded">
             {error}

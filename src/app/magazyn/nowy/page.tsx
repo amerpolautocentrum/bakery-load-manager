@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/supabaseClient'
 import { v4 as uuidv4 } from 'uuid'
+import { useSearchParams } from 'next/navigation'
 
 interface Produkt {
   id: string
@@ -17,252 +18,264 @@ interface Kierowca {
 }
 
 interface MagazynItem {
-  id: string
   produkt_id: string
   waga: number
-  kierowca_id: string
-  data: string
-  created_at: string
-  updated_at: string
-  wersja: string
 }
 
 export default function NowyMagazyn() {
+  const searchParams = useSearchParams()
+  const kierowcaId = searchParams.get('kierowca')
+
   const [produkty, setProdukty] = useState<Produkt[]>([])
-  const [kierowcy, setKierowcy] = useState<Kierowca[]>([])
+  const [kierowca, setKierowca] = useState<Kierowca | null>(null)
+  const [aktualnyMagazyn, setAktualnyMagazyn] = useState<Record<string, number[]>>({})
   const [wybraneCiasto, setWybraneCiasto] = useState('')
   const [waga, setWaga] = useState('1.000')
-  const [wybranyKierowca, setWybranyKierowca] = useState('')
-  const [aktualnyMagazyn, setAktualnyMagazyn] = useState<MagazynItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
 
   const dzisiaj = new Date().toISOString().split('T')[0]
 
-  // Pobierz dane przy montowaniu
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Produkty
-        const { data: produktyData } = await supabase.from('produkty').select('*')
+        setIsLoading(true)
+        const [{ data: produktyData }, { data: kierowcaData }] = await Promise.all([
+          supabase.from('produkty').select('*'),
+          supabase.from('kierowcy').select('*').eq('id', kierowcaId).single()
+        ])
+
         setProdukty(produktyData || [])
-
-        // Kierowcy
-        const { data: kierowcyData } = await supabase.from('kierowcy').select('*')
-        setKierowcy(kierowcyData || [])
-
-        // Dzisiejszy stan magazynu
-        const { data: magazynData } = await supabase
-          .from('magazyn')
-          .select('*')
-          .eq('data', dzisiaj)
-          .eq('czy_uzyte', false)
-          .eq('kierowca_id', '70e2c26d-63cd-4a52-9580-d7ee5437413b')
-
-        if (magazynData?.length > 0) {
-          setAktualnyMagazyn(magazynData)
-          setWybranyKierowca(magazynData[0].kierowca_id)
+        setKierowca(kierowcaData || null)
+        
+        // Pobierz wszystkie niezapisane magazyny z localStorage
+        const saved = localStorage.getItem('magazyn-roboczy')
+        if (saved) {
+          const allMagazyny = JSON.parse(saved)
+          // Ustaw magazyn dla aktualnego kierowcy (jeśli istnieje)
+          if (allMagazyny[kierowcaId!]) {
+            setAktualnyMagazyn(allMagazyny[kierowcaId!])
+          } else {
+            setAktualnyMagazyn({})
+          }
         }
       } catch (error) {
-        console.error('Błąd ładowania:', error)
+        console.error('Błąd podczas ładowania danych:', error)
       } finally {
         setIsLoading(false)
       }
     }
+    
+    if (kierowcaId) fetchData()
+  }, [kierowcaId])
 
-    fetchData()
-  }, [])
-
-  const handleDodajCiasto = () => {
-    if (!wybraneCiasto || !wybranyKierowca || parseFloat(waga) <= 0) {
-      alert('Wypełnij wszystkie pola!')
-      return
+  useEffect(() => {
+    if (kierowcaId && !isLoading) {
+      // Aktualizuj localStorage przy zmianie magazynu
+      const saved = localStorage.getItem('magazyn-roboczy')
+      let allMagazyny = saved ? JSON.parse(saved) : {}
+      
+      allMagazyny = {
+        ...allMagazyny,
+        [kierowcaId]: aktualnyMagazyn
+      }
+      
+      localStorage.setItem('magazyn-roboczy', JSON.stringify(allMagazyny))
     }
+  }, [aktualnyMagazyn, kierowcaId, isLoading])
 
-    const noweCiasto: MagazynItem = {
-      id: uuidv4(), // ✅ Unikalny identyfikator sztuki
-      produkt_id: wybraneCiasto,
-      waga: parseFloat(waga),
-      kierowca_id: wybranyKierowca,
-      data: dzisiaj,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      wersja: uuidv4() // ✅ Nowa wersja dla całej edycji
-    }
-
-    setAktualnyMagazyn(prev => [...prev, noweCiasto])
-    setWybraneCiasto('')
+  const handleDodaj = () => {
+    if (!wybraneCiasto || parseFloat(waga) <= 0) return
+    setAktualnyMagazyn(prev => {
+      const current = prev[wybraneCiasto] || []
+      return { ...prev, [wybraneCiasto]: [...current, parseFloat(waga)] }
+    })
     setWaga('1.000')
   }
 
-  const handleUsunCiasto = (id: string) => {
-    setAktualnyMagazyn(prev => prev.filter(item => item.id !== id))
+  const handleUsun = (ciasto: string, index: number) => {
+    setAktualnyMagazyn(prev => {
+      const updated = [...(prev[ciasto] || [])]
+      updated.splice(index, 1)
+      if (updated.length === 0) {
+        const { [ciasto]: _, ...rest } = prev
+        return rest
+      }
+      return { ...prev, [ciasto]: updated }
+    })
   }
 
-  const handleZapiszMagazyn = async () => {
-    if (!aktualnyMagazyn.length || !wybranyKierowca) {
-      alert('Uzupełnij dane!')
-      return
-    }
-
+  const handleZapisz = async () => {
+    if (!kierowcaId || Object.keys(aktualnyMagazyn).length === 0) return
     setIsSaving(true)
+    
     try {
-      const nowaWersja = uuidv4()
+      const wersja = uuidv4()
+      const rekordy = Object.entries(aktualnyMagazyn).flatMap(([ciasto, wagi]) =>
+        wagi.map(w => ({
+          id: uuidv4(),
+          produkt_id: ciasto,
+          waga: w,
+          kierowca_id: kierowcaId,
+          data: dzisiaj,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          wersja,
+          czy_uzyte: false
+        }))
+      )
 
-      // 1. Usuń stare dane tego dnia i kierowcy
-      const { error: deleteError } = await supabase
-        .from('magazyn')
-        .delete()
-        .eq('data', dzisiaj)
-        .eq('kierowca_id', wybranyKierowca)
-
-      if (deleteError) throw deleteError
-
-      // 2. Przygotuj nowe dane z tą samą wersją
-      const rekordyDoZapisu = aktualnyMagazyn.map(item => ({
-        ...item,
-        id: uuidv4(), // ✅ Nowe ID dla każdej sztuki
-        data: dzisiaj,
-        kierowca_id: wybranyKierowca,
-        czy_uzyte: false,
-        wersja: nowaWersja
-      }))
-
-      // 3. Zapisz nowe dane
-      const { error: insertError } = await supabase
-        .from('magazyn')
-        .insert(rekordyDoZapisu)
-
-      if (insertError) throw insertError
-
-      alert('✅ Załadunek został nadpisany')
-      window.location.href = '/magazyn/historia' // Odśwież stronę
-
-    } catch (error: any) {
+      const { error } = await supabase.from('magazyn').insert(rekordy)
+      
+      if (error) {
+        throw error
+      }
+      
+      // Po udanym zapisie, usuń magazyn z localStorage
+      const saved = localStorage.getItem('magazyn-roboczy')
+      if (saved) {
+        const allMagazyny = JSON.parse(saved)
+        const { [kierowcaId]: _, ...rest } = allMagazyny
+        localStorage.setItem('magazyn-roboczy', JSON.stringify(rest))
+      }
+      
+      alert('✅ Magazyn zapisany pomyślnie')
+      setAktualnyMagazyn({})
+    } catch (error) {
       console.error('Błąd zapisu:', error)
-      alert(`❌ Błąd zapisu: ${error.message}`)
+      alert('❌ Wystąpił błąd podczas zapisywania magazynu: ' + (error as Error).message)
     } finally {
       setIsSaving(false)
     }
   }
 
-  // Grupowanie ciast do podglądu
-  const groupedProducts = aktualnyMagazyn.reduce((acc, item) => {
-    const key = `${item.produkt_id}-${item.waga}`
-    if (!acc[key]) {
-      acc[key] = {
-        nazwa: item.produkt_id,
-        waga: item.waga,
-        ilosc: 0,
-        items: []
-      }
-    }
-    acc[key].ilosc += 1
-    acc[key].items.push(item)
-    return acc
-  }, {} as Record<string, {nazwa: string; waga: number; ilosc: number; items: MagazynItem[]}>)
+  if (isLoading || !kierowcaId) {
+    return (
+      <div className="p-4 flex justify-center items-center h-64">
+        <div className="text-center">
+          <p className="text-lg">Ładowanie...</p>
+          <p className="text-sm text-gray-500">Proszę czekać</p>
+        </div>
+      </div>
+    )
+  }
 
-  if (isLoading) return <div className="p-6 text-center">Ładowanie...</div>
+  if (!kierowca) {
+    return (
+      <div className="p-4">
+        <h1 className="text-xl font-bold mb-4">Błąd</h1>
+        <p className="mb-4">Nie znaleziono kierowcy o podanym ID</p>
+        <Link
+          href="/produkcja"
+          className="bg-gray-300 text-center py-2 px-4 rounded inline-block"
+        >
+          Wróć do listy kierowców
+        </Link>
+      </div>
+    )
+  }
 
   return (
-    <div className="p-4 max-w-md mx-auto">
-      <h1 className="text-xl font-bold mb-4">Nowy magazyn</h1>
+    <div className="p-4 max-w-2xl mx-auto">
+      <h1 className="text-xl font-bold mb-4">Tworzenie magazynu</h1>
 
-      <div className="mb-6">
-        <label className="block mb-2">Wybierz kierowcę:</label>
+      <div className="mb-4 p-2 bg-gray-100 rounded">
+        <p><strong>Kierowca:</strong> {kierowca.imie} {kierowca.nazwisko}</p>
+        <p><strong>Data:</strong> {dzisiaj}</p>
+      </div>
+
+      <div className="mb-4">
+        <label htmlFor="produkt-select" className="block mb-2 text-sm font-medium text-gray-700">
+          Wybierz ciasto:
+        </label>
         <select
-          value={wybranyKierowca}
-          onChange={(e) => setWybranyKierowca(e.target.value)}
-          className="w-full p-2 border rounded"
-          disabled={!!aktualnyMagazyn.length}
+          id="produkt-select"
+          className="w-full border p-2 rounded"
+          value={wybraneCiasto}
+          onChange={(e) => setWybraneCiasto(e.target.value)}
         >
-          <option value="">-- wybierz --</option>
-          {kierowcy.map(k => (
-            <option key={k.id} value={k.id}>
-              {k.imie} {k.nazwisko}
-            </option>
+          <option value="">-- wybierz ciasto --</option>
+          {produkty.map(p => (
+            <option key={p.id} value={p.id}>{p.nazwa}</option>
           ))}
         </select>
       </div>
 
-      <div className="bg-white p-4 rounded-lg shadow mb-6">
-        <h2 className="font-semibold mb-3">Dodaj ciasto</h2>
-        <div className="space-y-3">
-          <div>
-            <label className="block mb-1">Ciasto:</label>
-            <select
-              value={wybraneCiasto}
-              onChange={(e) => setWybraneCiasto(e.target.value)}
-              className="w-full p-2 border rounded"
-            >
-              <option value="">-- wybierz --</option>
-              {produkty.map(p => (
-                <option key={p.id} value={p.nazwa}>{p.nazwa}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block mb-1">Waga (kg):</label>
-            <input
-              type="number"
-              step="0.001"
-              min="0.001"
-              value={waga}
-              onChange={(e) => setWaga(e.target.value)}
-              className="w-full p-2 border rounded"
-            />
-          </div>
+      <div className="flex gap-2 mb-4">
+        <div className="flex-1">
+          <label htmlFor="waga-input" className="block mb-2 text-sm font-medium text-gray-700">
+            Waga (kg):
+          </label>
+          <input
+            id="waga-input"
+            type="number"
+            step="0.001"
+            min="0.001"
+            value={waga}
+            onChange={(e) => setWaga(e.target.value)}
+            className="w-full border p-2 rounded"
+          />
+        </div>
+        <div className="flex items-end">
           <button
-            onClick={handleDodajCiasto}
-            disabled={!wybraneCiasto || !wybranyKierowca}
-            className={`w-full py-2 rounded ${
-              !wybraneCiasto || !wybranyKierowca ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700'
-            } text-white`}
+            onClick={handleDodaj}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
           >
-            Dodaj ciasto
+            Dodaj
           </button>
         </div>
       </div>
 
-      {/* Lista ciast */}
-      <div className="bg-white p-4 rounded-lg shadow mb-6">
-        <h2 className="font-semibold mb-3">Twój magazyn:</h2>
-        {Object.keys(groupedProducts).length > 0 ? (
-          <ul className="space-y-2">
-            {Object.values(groupedProducts).map((product) => (
-              <li key={`${product.nazwa}-${product.waga}`}>
-                <div className="flex justify-between border-b pb-2">
-                  <span>{product.nazwa}: {product.ilosc} × {product.waga} kg</span>
-                  <button
-                    onClick={() => handleUsunCiasto(product.items[0].id)}
-                    className="text-red-600 hover:text-red-800"
-                  >
-                    Usuń
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+      <div className="bg-white rounded shadow p-4 mb-4">
+        <h2 className="font-semibold mb-2">Twój magazyn</h2>
+        {Object.entries(aktualnyMagazyn).length === 0 ? (
+          <p className="text-gray-500">Brak pozycji</p>
         ) : (
-          <p className="text-gray-500 text-center">Brak ciast</p>
+          Object.entries(aktualnyMagazyn).map(([ciasto, wagi]) => (
+            <div key={ciasto} className="mb-4 border-b pb-2">
+              <strong className="text-lg">
+                {produkty.find(p => p.id === ciasto)?.nazwa || 'Nieznane ciasto'}
+              </strong>
+              <ul className="ml-4 mt-1">
+                {wagi.map((w, i) => (
+                  <li key={i} className="flex justify-between items-center py-1">
+                    <span>{w.toFixed(3)} kg</span>
+                    <button 
+                      onClick={() => handleUsun(ciasto, i)} 
+                      className="text-red-500 hover:text-red-700"
+                    >
+                      Usuń
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
         )}
       </div>
 
-      {/* Przyciski */}
-      <div className="flex space-x-3">
-        <Link href="/magazyn" className="flex-1 text-center bg-gray-200 py-2 rounded">
-          Anuluj
-        </Link>
-        <button
-          onClick={handleZapiszMagazyn}
-          disabled={isSaving || aktualnyMagazyn.length === 0}
-          className={`flex-1 py-2 rounded text-white ${
-            isSaving || aktualnyMagazyn.length === 0
-              ? 'bg-gray-400 cursor-not-allowed'
-              : 'bg-green-600 hover:bg-green-700'
-          }`}
+      <div className="flex gap-2">
+        <Link
+          href="/produkcja"
+          className="w-1/2 bg-gray-300 text-center py-2 rounded hover:bg-gray-400"
         >
-          {isSaving ? 'Zapisywanie...' : 'Zapisz załadunek'}
+          Wróć do listy kierowców
+        </Link>
+
+        <button
+          onClick={handleZapisz}
+          disabled={isSaving || Object.keys(aktualnyMagazyn).length === 0}
+          className="w-1/2 bg-green-600 text-white py-2 rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isSaving ? (
+            <span className="flex items-center justify-center">
+              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Zapisywanie...
+            </span>
+          ) : 'Zapisz magazyn'}
         </button>
       </div>
     </div>

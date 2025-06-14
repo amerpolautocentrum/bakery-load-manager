@@ -1,59 +1,56 @@
 'use server'
 
-import Link from 'next/link'
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
+import { cookies as getCookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { Database } from '@/types/supabase'
+import Link from 'next/link'
 
 export default async function DashboardPage() {
-  const cookieStore = await cookies()
+  const cookieStore = await getCookies()
   const supabase = createServerComponentClient<Database>({ cookies: () => cookieStore })
 
-  // 1. Sprawdź sesję
   const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-
   if (!session || sessionError) {
     redirect('/login')
   }
 
-  // 2. Pobierz dane profilu
-  const { data: profileData, error: profileError } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', session.user.id)
-    .limit(1)
+  const userId = session.user.id
 
-  const profile = profileData?.[0]
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('role, login')
+    .eq('id', userId)
+    .single()
 
   if (profileError || !profile) {
-    console.error('Błąd pobierania profilu:', profileError?.message || 'Brak danych')
     return (
-      <div className="p-8">
-        <div className="text-red-600">Błąd ładowania danych profilu</div>
-        <Link 
-          href="/dashboard"
-          className="mt-4 inline-block bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-        >
-          Odśwież stronę
-        </Link>
+      <div className="p-8 text-center text-red-600">
+        Błąd ładowania danych profilu. Skontaktuj się z administratorem.
       </div>
     )
   }
 
+  const isKierowca = profile.role === 'kierowca_id'
+
+  if (!isKierowca) {
+    if (profile.role === 'produkcja') redirect('/produkcja')
+    if (profile.role === 'admin') redirect('/admin')
+    return <div className="text-center text-gray-600">Nieznana rola: {profile.role}</div>
+  }
+
   return (
-    <div className="p-8">
+    <div className="p-6">
       <div className="flex justify-between items-start mb-8">
         <h1 className="text-2xl font-bold">System Cukierni</h1>
-        
+
         <div className="flex items-center gap-4">
           <div className="text-sm text-gray-600">
-            Zalogowany jako: <span className="font-medium">{session.user.email}</span> 
-            <span className="ml-2 px-2 py-1 bg-gray-100 rounded">{profile.role}</span>
+            Zalogowany jako: {profile.login}
+            <span className="ml-2 px-2 py-1 bg-gray-100 rounded text-xs">{profile.role}</span>
           </div>
-          
           <form action={handleSignOut}>
-            <button 
+            <button
               type="submit"
               className="text-sm bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700"
             >
@@ -62,83 +59,32 @@ export default async function DashboardPage() {
           </form>
         </div>
       </div>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Sekcja magazynów */}
-        <div className="border rounded-lg p-6 bg-white shadow">
-          <h2 className="text-xl font-semibold mb-4">Magazyn</h2>
-          <Link 
-            href="/magazyn"
-            className="inline-block bg-blue-600 text-white px-4 py-2 rounded mb-4 hover:bg-blue-700 transition-colors"
-          >
-            {profile.role === 'cukiernia' ? 'Zarządzaj magazynem' : 'Twój magazyn'}
-          </Link>
-          <Link 
-            href="/magazyn/historia"
-            className="block text-blue-600 hover:text-blue-800 hover:underline"
-          >
-            Historia magazynów →
-          </Link>
-        </div>
 
-        {/* Sekcja WZ */}
-        <div className="border rounded-lg p-6 bg-white shadow">
-          <h2 className="text-xl font-semibold mb-4">Dokumenty WZ</h2>
-          <Link 
-            href="/wz"
-            className="inline-block bg-green-600 text-white px-4 py-2 rounded mb-4 hover:bg-green-700 transition-colors"
-          >
-            Utwórz nowy WZ
-          </Link>
-          <Link 
-            href="/wz/historia"
-            className="block text-green-600 hover:text-green-800 hover:underline"
-          >
-            Historia WZ →
-          </Link>
-        </div>
-
-        {/* Panel administracyjny – tylko dla admina */}
-        {profile.role === 'admin' && (
-          <div className="border rounded-lg p-6 col-span-full bg-white shadow">
-            <h2 className="text-xl font-semibold mb-4">Panel administracyjny</h2>
-            <div className="flex flex-wrap gap-4">
-              <Link 
-                href="/admin/kierowcy"
-                className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition-colors"
-              >
-                Zarządzaj kierowcami
-              </Link>
-              <Link 
-                href="/admin/kierowcy/dodaj"
-                className="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 transition-colors"
-              >
-                Dodaj kierowcę
-              </Link>
-              <Link 
-                href="/admin/raporty"
-                className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition-colors"
-              >
-                Generuj raporty
-              </Link>
-              <Link 
-                href="/admin/produkty"
-                className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 transition-colors"
-              >
-                Zarządzaj produktami
-              </Link>
-            </div>
-          </div>
-        )}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <Link href="/magazyn" className="block bg-blue-600 text-white p-4 rounded shadow hover:bg-blue-700 transition">
+          Twój magazyn
+        </Link>
+        <Link href="/wz" className="block bg-green-600 text-white p-4 rounded shadow hover:bg-green-700 transition">
+          Wystaw dokument WZ
+        </Link>
+        <Link href="/magazyn/historia" className="block bg-gray-600 text-white p-4 rounded shadow hover:bg-gray-700 transition">
+          Historia magazynów
+        </Link>
+        <Link href="/wz/historia" className="block bg-gray-600 text-white p-4 rounded shadow hover:bg-gray-700 transition">
+          Historia WZ
+        </Link>
+        <Link href="/pozostale" className="block bg-orange-600 text-white p-4 rounded shadow hover:bg-orange-700 transition">
+          Magazyn po trasie
+        </Link>
       </div>
     </div>
   )
 }
 
-// Funkcja wylogowania – musi być poza JSX
 async function handleSignOut() {
   'use server'
-  const supabase = createServerComponentClient<Database>({ cookies })
+  const cookieStore = await getCookies()
+  const supabase = createServerComponentClient<Database>({ cookies: () => cookieStore })
   await supabase.auth.signOut()
   redirect('/login')
 }

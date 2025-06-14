@@ -1,127 +1,183 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { supabase } from '@/supabaseClient'
+import dayjs from 'dayjs'
+import { useRouter } from 'next/navigation'
 
-interface Kierowca {
-  id: string
-  imie: string
-  nazwisko: string
-}
-
-export default function Magazyn() {
-  const [dzisiejszyMagazyn, setDzisiejszyMagazyn] = useState<any[]>([])
-  const [kierowca, setKierowca] = useState<Kierowca | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+export default function MagazynKierowcy() {
+  const router = useRouter()
+  const [pozycje, setPozycje] = useState<any[]>([])
+  const [produkty, setProdukty] = useState<any[]>([])
+  const [nowaPozycja, setNowaPozycja] = useState({ produkt_id: '', waga: '' })
+  const [zatwierdzony, setZatwierdzony] = useState(false)
+  const [czyZapisano, setCzyZapisano] = useState(false)
+  const [zaladowano, setZaladowano] = useState(false)
+  const [kierowcaId, setKierowcaId] = useState<string | null>(null)
 
   useEffect(() => {
-    const fetchDane = async () => {
-      setIsLoading(true)
-      try {
-        const dzisiaj = new Date().toISOString().split('T')[0]
-        
-        // Pobierz dzisiejszy magazyn
-        const { data: magazynData } = await supabase
-          .from('magazyn')
-          .select('*')
-          .eq('data', dzisiaj)
-          .eq('czy_uzyte', false)
+    const init = async () => {
+      const {
+        data: { user }
+      } = await supabase.auth.getUser()
+      if (!user) return
 
-        if (magazynData && magazynData.length > 0) {
-          setDzisiejszyMagazyn(magazynData)
-          
-          // Pobierz dane kierowcy
-          const { data: kierowcaData } = await supabase
-            .from('kierowcy')
-            .select('*')
-            .eq('id', magazynData[0].kierowca_id)
-            .single()
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('kierowca_id')
+        .eq('id', user.id)
+        .single()
 
-          setKierowca(kierowcaData)
-        }
-      } catch (error) {
-        console.error('Błąd:', error)
-      } finally {
-        setIsLoading(false)
+      if (!profile?.kierowca_id) return
+
+      setKierowcaId(profile.kierowca_id)
+
+      const dzisiaj = dayjs().format('YYYY-MM-DD')
+      const { data: istniejacyMagazyn } = await supabase
+        .from('magazyn')
+        .select('id, produkt_id, waga, zatwierdzony_przez_kontrolera, zatwierdzony_przez_kierowce, produkty(nazwa, typ)')
+        .eq('kierowca_id', profile.kierowca_id)
+        .eq('data', dzisiaj)
+
+      if (istniejacyMagazyn && istniejacyMagazyn.length > 0) {
+        const przetworzony = istniejacyMagazyn.map((m) => ({
+          produkt_id: m.produkt_id,
+          waga: m.waga,
+          nazwa: m.produkty?.nazwa || 'Nieznany',
+          typ: m.produkty?.typ || 'ciasto'
+        }))
+        setPozycje(przetworzony)
+        setZatwierdzony(!!istniejacyMagazyn[0].zatwierdzony_przez_kierowce)
       }
+
+      const { data: prod } = await supabase.from('produkty').select('id, nazwa, typ')
+      setProdukty(prod || [])
+
+      setZaladowano(true)
     }
 
-    fetchDane()
+    init()
   }, [])
 
-  // Grupuj produkty
-  const grupowaneProdukty = dzisiejszyMagazyn.reduce((acc, item) => {
-    if (!acc[item.produkt_id]) {
-      acc[item.produkt_id] = {
-        nazwa: item.produkt_id,
-        ilosc: 0,
-        waga: item.waga
-      }
-    }
-    acc[item.produkt_id].ilosc += 1
-    return acc
-  }, {})
+  const dodajPozycje = () => {
+    if (!nowaPozycja.produkt_id || !nowaPozycja.waga || zatwierdzony) return
+    const produkt = produkty.find((p) => p.id === nowaPozycja.produkt_id)
+    if (!produkt) return
+    setPozycje([...pozycje, { ...produkt, waga: nowaPozycja.waga }])
+    setNowaPozycja({ produkt_id: '', waga: '' })
+  }
 
-  if (isLoading) {
-    return <div className="p-6 text-center">Ładowanie...</div>
+  const usunPozycje = (index: number) => {
+    if (zatwierdzony) return
+    setPozycje(pozycje.filter((_, i) => i !== index))
+  }
+
+  const zapiszMagazyn = async () => {
+    const dzisiaj = dayjs().format('YYYY-MM-DD')
+
+    if (!kierowcaId) {
+      alert('Brak ID kierowcy')
+      return
+    }
+
+    // Usunięcie wcześniejszego magazynu tego dnia
+    await supabase
+      .from('magazyn')
+      .delete()
+      .eq('data', dzisiaj)
+      .eq('kierowca_id', kierowcaId)
+
+    // Zapis nowych pozycji
+    const nowePozycje = pozycje.map((p) => ({
+      produkt_id: p.id || p.produkt_id,
+      waga: p.waga,
+      data: dzisiaj,
+      kierowca_id: kierowcaId,
+      zatwierdzony_przez_kierowce: true
+    }))
+
+    const { error } = await supabase.from('magazyn').insert(nowePozycje)
+    if (error) {
+      alert('Błąd zapisu magazynu')
+      return
+    }
+
+    setZatwierdzony(true)
+    setCzyZapisano(true)
+  }
+
+  if (!zaladowano) return <div className="p-4">Ładowanie...</div>
+
+  if (zatwierdzony || czyZapisano) {
+    return (
+      <div className="p-4">
+        <h1 className="text-xl font-bold mb-4">Twój magazyn</h1>
+        <p className="text-green-600">Magazyn został zapisany i zatwierdzony.</p>
+        <button
+          onClick={() => router.push('/dashboard')}
+          className="mt-4 bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-500"
+        >
+          Wróć do panelu
+        </button>
+      </div>
+    )
   }
 
   return (
-    <main className="p-4 max-w-md mx-auto">
-      <h1 className="text-xl font-bold mb-4">Magazyn</h1>
+    <div className="p-4 space-y-4">
+      <h1 className="text-xl font-bold">Twój magazyn – {dayjs().format('DD.MM.YYYY')}</h1>
 
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        <Link
-          href="/magazyn/nowy"
-          className="bg-green-600 text-white text-center py-2 px-3 rounded-md hover:bg-green-700"
-        >
-          {dzisiejszyMagazyn.length > 0 ? 'Edytuj' : 'Nowy'}
-        </Link>
-        <Link
-          href="/magazyn/historia"
-          className="bg-blue-600 text-white text-center py-2 px-3 rounded-md hover:bg-blue-700"
-        >
-          Historia
-        </Link>
+      <div className="space-y-2">
+        {pozycje.map((p, i) => (
+          <div key={i} className="flex items-center gap-4">
+            <div className="w-1/2">{p.nazwa}</div>
+            <div className="w-1/4">{p.waga} kg</div>
+            <button onClick={() => usunPozycje(i)} className="text-red-600">Usuń</button>
+          </div>
+        ))}
       </div>
 
-      {dzisiejszyMagazyn.length > 0 && kierowca && (
-        <div className="bg-white rounded-lg shadow p-4 mb-4">
-          <h2 className="font-semibold mb-2">Dzisiejszy magazyn</h2>
-          <div className="mb-3">
-            <p className="text-sm">
-              <span className="font-medium">Kierowca:</span> {kierowca.imie} {kierowca.nazwisko}
-            </p>
-            <p className="text-sm">
-              <span className="font-medium">Data:</span> {new Date().toLocaleDateString()}
-            </p>
-          </div>
-        </div>
-      )}
+      <div className="flex gap-2 items-center">
+        <select
+          className="border px-2 py-1"
+          value={nowaPozycja.produkt_id}
+          onChange={(e) => setNowaPozycja((prev) => ({ ...prev, produkt_id: e.target.value }))}
+        >
+          <option value="">Wybierz ciasto</option>
+          {produkty.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.nazwa} ({p.typ})
+            </option>
+          ))}
+        </select>
 
-      <div className="bg-white rounded-lg shadow p-4">
-        <h2 className="font-semibold mb-3">Zawartość</h2>
-        
-        {Object.keys(grupowaneProdukty).length > 0 ? (
-          <div className="space-y-3">
-            {Object.values(grupowaneProdukty).map((produkt: any) => (
-              <div key={produkt.nazwa} className="border rounded-md p-3">
-                <div className="flex justify-between items-center">
-                  <h3 className="font-medium">{produkt.nazwa}</h3>
-                  <span className="text-sm bg-gray-100 px-2 py-1 rounded">
-                    {produkt.ilosc} szt. × {produkt.waga} kg
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-gray-500 text-center py-4">
-            {dzisiejszyMagazyn.length > 0 ? 'Brak ciast w magazynie' : 'Brak dzisiejszego magazynu'}
-          </p>
-        )}
+        <input
+          type="text"
+          placeholder="Waga (np. 1.250)"
+          className="border px-2 py-1"
+          value={nowaPozycja.waga}
+          onChange={(e) => setNowaPozycja((prev) => ({ ...prev, waga: e.target.value }))}
+        />
+
+        <button onClick={dodajPozycje} className="bg-green-600 text-white px-3 py-1 rounded">
+          Dodaj
+        </button>
       </div>
-    </main>
+
+      <div className="flex gap-4 mt-4">
+        <button
+          onClick={zapiszMagazyn}
+          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+        >
+          Zapisz magazyn
+        </button>
+        <button
+          onClick={() => router.push('/dashboard')}
+          className="bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-500"
+        >
+          Wróć do panelu
+        </button>
+      </div>
+    </div>
   )
 }

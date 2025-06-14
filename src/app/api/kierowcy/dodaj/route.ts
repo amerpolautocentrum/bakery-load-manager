@@ -12,6 +12,7 @@ export async function POST(req: Request) {
       { auth: { autoRefreshToken: false, persistSession: false } }
     )
 
+    // 🔐 Utworzenie konta użytkownika
     const { data: userResult, error: userError } = await supabase.auth.admin.createUser({
       email,
       password,
@@ -28,7 +29,7 @@ export async function POST(req: Request) {
 
     const userId = userResult.user.id
 
-    // Nowe i bezpieczne sprawdzenie profilu
+    // 🧾 Sprawdzenie czy profil już istnieje
     const profileCheck = await supabase
       .from('profiles')
       .select('id')
@@ -54,16 +55,34 @@ export async function POST(req: Request) {
       }
     }
 
-    const { error: kierowcaError } = await supabase.from('kierowcy').insert({
-      id: userId,
-      imie,
-      nazwisko,
-      telefon
-    })
+    // 🚚 Dodanie kierowcy do tabeli kierowcy
+    const { data: kierowcaData, error: kierowcaError } = await supabase
+      .from('kierowcy')
+      .insert({
+        id: userId,
+        imie,
+        nazwisko,
+        telefon
+      })
+      .select()
+      .single()
 
-    if (kierowcaError) {
+    if (kierowcaError || !kierowcaData) {
       return NextResponse.json(
-        { error: 'Błąd przy zapisie do kierowcy: ' + kierowcaError.message },
+        { error: 'Błąd przy zapisie do kierowcy: ' + kierowcaError?.message },
+        { status: 400 }
+      )
+    }
+
+    // ✅ Uzupełnienie kierowca_id w profiles
+    const { error: updateError } = await supabase
+      .from('profiles')
+      .update({ kierowca_id: kierowcaData.id })
+      .eq('id', userId)
+
+    if (updateError) {
+      return NextResponse.json(
+        { error: 'Błąd przy aktualizacji profiles: ' + updateError.message },
         { status: 400 }
       )
     }
