@@ -73,38 +73,52 @@ export default function MagazynKierowcy() {
   }
 
   const zapiszMagazyn = async () => {
-    const dzisiaj = dayjs().format('YYYY-MM-DD')
+  const dzisiaj = dayjs().format('YYYY-MM-DD')
 
-    if (!kierowcaId) {
-      alert('Brak ID kierowcy')
-      return
-    }
-
-    // Usunięcie wcześniejszego magazynu tego dnia
-    await supabase
-      .from('magazyn')
-      .delete()
-      .eq('data', dzisiaj)
-      .eq('kierowca_id', kierowcaId)
-
-    // Zapis nowych pozycji
-    const nowePozycje = pozycje.map((p) => ({
-      produkt_id: p.id || p.produkt_id,
-      waga: p.waga,
-      data: dzisiaj,
-      kierowca_id: kierowcaId,
-      zatwierdzony_przez_kierowce: true
-    }))
-
-    const { error } = await supabase.from('magazyn').insert(nowePozycje)
-    if (error) {
-      alert('Błąd zapisu magazynu')
-      return
-    }
-
-    setZatwierdzony(true)
-    setCzyZapisano(true)
+  if (!kierowcaId) {
+    alert('Brak ID kierowcy')
+    return
   }
+
+  // Usuń stare pozycje z tego dnia (tylko robocze)
+  await supabase
+    .from('magazyn')
+    .delete()
+    .eq('data', dzisiaj)
+    .eq('kierowca_id', kierowcaId)
+    .eq('status', 'roboczy')
+
+  // Sprawdź, czy wszystkie pozycje mają poprawny produkt_id
+  for (const p of pozycje) {
+    if (!p.produkt_id && !p.id) {
+      console.error('Brak ID produktu w pozycji:', p)
+      alert('Wystąpił problem z jednym z produktów – brak ID.')
+      return
+    }
+  }
+
+  const nowePozycje = pozycje.map((p) => ({
+    produkt_id: p.produkt_id || p.id, // preferuj produkt_id, bo to UUID z selecta
+    waga: p.waga,
+    data: dzisiaj,
+    kierowca_id: kierowcaId,
+    status: 'roboczy',
+    zatwierdzony_przez_kierowce: true,
+    wersja: new Date().toISOString()
+  }))
+
+  const { error } = await supabase.from('magazyn').insert(nowePozycje)
+  if (error) {
+    console.error('Błąd zapisu magazynu:', error)
+    alert('Błąd zapisu magazynu – sprawdź konsolę.')
+    return
+  }
+
+  setZatwierdzony(true)
+  setCzyZapisano(true)
+  router.push('/magazyn/historia')
+}
+
 
   if (!zaladowano) return <div className="p-4">Ładowanie...</div>
 

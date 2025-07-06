@@ -42,7 +42,8 @@ export default async function DashboardPage() {
   return (
     <div className="p-6">
       <div className="flex justify-between items-start mb-8">
-        <h1 className="text-2xl font-bold">System Cukierni</h1>
+        <img src="/logo/CakeTrack_cleaned.svg" alt="CakeTrack logo" className="h-10" />
+
 
         <div className="flex items-center gap-4">
           <div className="text-sm text-gray-600">
@@ -70,12 +71,29 @@ export default async function DashboardPage() {
         <Link href="/magazyn/historia" className="block bg-gray-600 text-white p-4 rounded shadow hover:bg-gray-700 transition">
           Historia magazynów
         </Link>
+        <Link
+  href="/dashboard/trasy"
+  className="block bg-purple-600 text-white p-4 rounded shadow hover:bg-purple-700 transition"
+>
+  Trasy
+</Link>
+<Link
+  href="/kp/nowy"
+  className="block bg-yellow-500 text-white p-4 rounded shadow hover:bg-yellow-600 transition"
+>
+  Wystaw KP
+</Link>
+
         <Link href="/wz/historia" className="block bg-gray-600 text-white p-4 rounded shadow hover:bg-gray-700 transition">
           Historia WZ
         </Link>
         <Link href="/pozostale" className="block bg-orange-600 text-white p-4 rounded shadow hover:bg-orange-700 transition">
           Magazyn po trasie
         </Link>
+        <Link href="/raportkierowcy" className="block bg-gray-600 text-white p-4 rounded shadow hover:bg-gray-700 transition">
+  Raport dnia
+</Link>
+
       </div>
     </div>
   )

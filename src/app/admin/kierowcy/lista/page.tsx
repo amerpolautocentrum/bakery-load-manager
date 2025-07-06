@@ -63,14 +63,30 @@ export default function ListaKierowcow() {
             </div>
             <div className="flex gap-3">
               <Link
+                href={`/admin/kierowcy/${k.id}/historia-wz`}
+                className="text-indigo-600 hover:underline"
+                title="Historia WZ"
+              >
+                📄 WZ
+              </Link>
+              <Link
+                href={`/admin/kierowcy/${k.id}/historia-magazynow`}
+                className="text-green-600 hover:underline"
+                title="Historia magazynów"
+              >
+                📦 Magazyn
+              </Link>
+              <Link
                 href={`/admin/kierowcy/${k.id}/edytuj`}
                 className="text-blue-600 hover:underline"
+                title="Edytuj"
               >
                 ✏️ Edytuj
               </Link>
               <button
                 onClick={() => handleDelete(k.id)}
                 className="text-red-600 hover:underline"
+                title="Usuń"
               >
                 ❌ Usuń
               </button>
@@ -79,7 +95,6 @@ export default function ListaKierowcow() {
         ))}
       </div>
 
-      {/* Przycisk powrotu */}
       <button
         onClick={() => router.push('/admin/kierowcy')}
         className="mt-8 bg-gray-200 hover:bg-gray-300 text-black font-semibold py-2 px-4 rounded"

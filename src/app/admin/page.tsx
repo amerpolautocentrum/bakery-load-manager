@@ -66,9 +66,26 @@ export default async function AdminPage() {
           <h2 className="text-xl font-semibold mb-4">Produkty</h2>
           <Link
             href="/admin/produkty"
-            className="block bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 text-center"
+            className="block bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 mb-3 text-center"
           >
             Zarządzaj produktami
+          </Link>
+          <Link
+            href="/admin/produkty/ceny"
+            className="block bg-amber-600 text-white px-4 py-2 rounded hover:bg-amber-700 text-center"
+          >
+            Zarządzaj cenami
+          </Link>
+        </div>
+
+        {/* Promocje */}
+        <div className="border rounded-lg p-6 bg-white shadow">
+          <h2 className="text-xl font-semibold mb-4">Promocje</h2>
+          <Link
+            href="/admin/promocje"
+            className="block bg-pink-600 text-white px-4 py-2 rounded hover:bg-pink-700 text-center"
+          >
+            Zarządzaj promocjami
           </Link>
         </div>
 
@@ -90,15 +107,24 @@ export default async function AdminPage() {
         </div>
 
         {/* Raporty */}
-        <div className="border rounded-lg p-6 col-span-full bg-white shadow">
-          <h2 className="text-xl font-semibold mb-4">Raporty</h2>
-          <Link
-            href="/admin/raporty"
-            className="block bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 text-center"
-          >
-            Generuj raporty
-          </Link>
-        </div>
+<div className="border rounded-lg p-6 col-span-full bg-white shadow">
+  <h2 className="text-xl font-semibold mb-4">Raporty</h2>
+
+  <Link
+    href="/admin/raporty/sprzedaz"
+    className="block bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 text-center mb-3"
+  >
+    📈 Sprzedaż kierowców
+  </Link>
+
+  <Link
+    href="/admin/raporty/kp"
+    className="block bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700 text-center"
+  >
+    💰 Rozliczenia KP
+  </Link>
+</div>
+
       </div>
     </div>
   )

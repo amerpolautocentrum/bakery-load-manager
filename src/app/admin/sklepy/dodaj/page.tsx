@@ -22,7 +22,15 @@ export default function DodajSklep() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
-  const wszystkieDni = ['poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota', 'niedziela']
+  const wszystkieDni = [
+    { label: 'Poniedziałek', value: '1' },
+    { label: 'Wtorek', value: '2' },
+    { label: 'Środa', value: '3' },
+    { label: 'Czwartek', value: '4' },
+    { label: 'Piątek', value: '5' },
+    { label: 'Sobota', value: '6' },
+    { label: 'Niedziela', value: '7' },
+  ]
 
   useEffect(() => {
     const fetchData = async () => {
@@ -35,9 +43,9 @@ export default function DodajSklep() {
     fetchData()
   }, [])
 
-  const toggleDzien = (dzien: string) => {
-    setDniTygodnia(prev =>
-      prev.includes(dzien) ? prev.filter(d => d !== dzien) : [...prev, dzien]
+  const toggleDzien = (value: string) => {
+    setDniTygodnia((prev) =>
+      prev.includes(value) ? prev.filter((d) => d !== value) : [...prev, value]
     )
   }
 
@@ -59,7 +67,7 @@ export default function DodajSklep() {
         platnosc,
         siec,
         kierowca_id: kierowcaId,
-        dni_tygodnia: dniTygodnia
+        dni_tygodnia: dniTygodnia,
       }),
     })
 
@@ -138,10 +146,14 @@ export default function DodajSklep() {
         <div>
           <label className="block font-medium">Dni trasy</label>
           <div className="flex flex-wrap gap-2">
-            {wszystkieDni.map((dzien) => (
-              <label key={dzien} className="flex items-center gap-1">
-                <input type="checkbox" checked={dniTygodnia.includes(dzien)} onChange={() => toggleDzien(dzien)} />
-                {dzien}
+            {wszystkieDni.map(({ label, value }) => (
+              <label key={value} className="flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={dniTygodnia.includes(value)}
+                  onChange={() => toggleDzien(value)}
+                />
+                {label}
               </label>
             ))}
           </div>

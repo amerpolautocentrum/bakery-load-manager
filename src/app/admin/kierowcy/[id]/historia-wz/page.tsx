@@ -2,60 +2,92 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 import { supabase } from '@/supabaseClient'
 
-type DokumentWZ = {
-  id: string
-  data: string
-  numer_wz: string | null
-  wartosc_brutto: number | null
-  status: string | null
-}
+const miesiacePL = [
+  'styczeń', 'luty', 'marzec', 'kwiecień', 'maj', 'czerwiec',
+  'lipiec', 'sierpień', 'wrzesień', 'październik', 'listopad', 'grudzień'
+]
 
 export default function HistoriaWZ() {
   const { id } = useParams()
-  const [dokumenty, setDokumenty] = useState<DokumentWZ[]>([])
+  const [kierowca, setKierowca] = useState('')
+  const [miesiace, setMiesiace] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const fetchData = async () => {
-      const { data, error } = await supabase
-        .from('wz_dokumenty')
-        .select('id, data, numer_wz, wartosc_brutto, status')
-        .eq('kierowca_id', id)
-        .order('data', { ascending: false })
+      // Imię i nazwisko kierowcy
+      const { data: kierowcaData } = await supabase
+        .from('kierowcy')
+        .select('imie, nazwisko')
+        .eq('id', id)
+        .single()
 
-      if (error) {
-        console.error('Błąd pobierania danych:', error)
-      } else {
-        setDokumenty(data || [])
+      if (kierowcaData) {
+        setKierowca(`${kierowcaData.imie} ${kierowcaData.nazwisko}`)
       }
+
+      // Miesiące z dokumentami WZ
+      const { data: dokumenty } = await supabase
+        .from('wz_dokumenty')
+        .select('data')
+        .eq('kierowca_id', id)
+
+      if (dokumenty) {
+        const miesiaceSet = new Set<string>()
+        dokumenty.forEach(doc => {
+          const d = new Date(doc.data)
+          const miesiac = miesiacePL[d.getMonth()]
+          const rok = d.getFullYear()
+          miesiaceSet.add(`${miesiac}-${rok}`)
+        })
+
+        const posortowane = Array.from(miesiaceSet).sort((a, b) => {
+          const [ma, ra] = a.split('-')
+          const [mb, rb] = b.split('-')
+          return rb.localeCompare(ra) || miesiacePL.indexOf(mb) - miesiacePL.indexOf(ma)
+        })
+
+        setMiesiace(posortowane)
+      }
+
       setLoading(false)
     }
 
     fetchData()
   }, [id])
 
-  if (loading) return <div className="p-6">Ładowanie dokumentów WZ...</div>
+  if (loading) return <div className="p-6 text-center">Ładowanie danych...</div>
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">📄 Historia dokumentów WZ</h1>
+    <div className="p-6 max-w-3xl mx-auto">
+      <h1 className="text-2xl font-bold mb-4">Historia WZ – {kierowca}</h1>
 
-      {dokumenty.length === 0 ? (
-        <p>Brak dokumentów WZ dla tego kierowcy.</p>
+      {miesiace.length === 0 ? (
+        <p className="text-gray-500">Brak dokumentów WZ.</p>
       ) : (
-        <ul className="space-y-4">
-          {dokumenty.map(doc => (
-            <li key={doc.id} className="border p-4 rounded shadow">
-              <div><strong>Data:</strong> {new Date(doc.data).toLocaleDateString()}</div>
-              <div><strong>Numer WZ:</strong> {doc.numer_wz || '–'}</div>
-              <div><strong>Status:</strong> {doc.status || '–'}</div>
-              <div><strong>Wartość brutto:</strong> {doc.wartosc_brutto?.toFixed(2) || '0.00'} zł</div>
+        <ul className="space-y-3">
+          {miesiace.map(m => (
+            <li key={m}>
+              <Link
+                href={`/admin/kierowcy/${id}/historia-wz/${m}`}
+                className="text-blue-600 hover:underline"
+              >
+                📄 {m}
+              </Link>
             </li>
           ))}
         </ul>
       )}
+
+      <Link
+        href="/admin/kierowcy"
+        className="inline-block mt-6 text-gray-600 hover:underline"
+      >
+        ← Powrót do listy kierowców
+      </Link>
     </div>
   )
 }
